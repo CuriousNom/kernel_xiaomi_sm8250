@@ -143,8 +143,8 @@ Android.bp
 # Tech package directories
 #techpack/
 
-# Out dir
-/out/
-
-# Build log
-build.log
+# Build system
+out/
+tc/
+anykernel/
+error.log
