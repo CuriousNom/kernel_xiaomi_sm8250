@@ -1,343 +1,75 @@
 #!/bin/bash
 
-source ../settings.sh
+# Ensure the script exits on error
+set -e
 
-#
-#   settings.sh (example)
-#
-# export VERSION="1.x.x"
-# export BUILD=1
-# export PREFIX="e"
-# export DESC="description"
-# export DEVICE="alioth"
-# export TGTOKEN=bot_id
-# export LAST=last commit hash for generation changelog
-# export TYPE="test or early"
-# export LEVEL=1
-# export EXTRA=""
-#
+TOOLCHAIN_PATH=$HOME/tc/bin
+GIT_COMMIT_ID=$(git rev-parse --short=8 HEAD)
 
-START=$(date +%s)
+if [ ! -d $TOOLCHAIN_PATH ]; then
+    echo "TOOLCHAIN_PATH [$TOOLCHAIN_PATH] does not exist."
+    echo "Please ensure the toolchain is there, or change TOOLCHAIN_PATH in the script to your toolchain path."
+    exit 1
+fi
 
-rm -rf out
+echo "TOOLCHAIN_PATH: [$TOOLCHAIN_PATH]"
+export PATH="$TOOLCHAIN_PATH:$PATH"
 
-MAIN=/home/timisong
+# Enable ccache for speed up compiling
+export CCACHE_DIR="$HOME/.cache/ccache_mikernel"
+export CC="ccache gcc"
+export CXX="ccache g++"
+export PATH="/usr/lib/ccache:$PATH"
+echo "CCACHE_DIR: [$CCACHE_DIR]"
 
-KERNEL=$PWD
+MAKE_ARGS="ARCH=arm64 O=out CC=clang LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip"
 
-CLANG=$MAIN/clang
-GCC_ARM=$MAIN/arm-linux-androideabi-4.9
-GCC_AARCH64=$MAIN/aarch64-linux-android-4.9
+# Check clang is existing.
+echo "[clang --version]:"
+clang --version
 
-check_and_clone() {
-    local dir=$1
-    local repo=$2
-    local name=$3
+# Export variables
+export KBUILD_BUILD_USER="aryan"
+export KBUILD_BUILD_HOST="curiousnom"
+export KBUILD_LAST_COMMIT=${GIT_COMMIT_ID}
 
-    if [ ! -d $dir ]; then
-        echo Папка $dir не существует. Клонирование $repo
-        cd $MAIN
-        git clone $repo $name
-    fi
-}
+echo "Cleaning..."
+rm -rf out/
+rm -rf error.log
 
-check_and_wget() {
-    local dir=$1
-    local repo=$2
-
-    if [ ! -d $dir ]; then
-        echo Папка $dir не существует. Клонирование $repo
-        mkdir $dir
-        cd $dir
-        wget -O clang.tar.gz $repo
-        tar -zxvf clang.tar.gz
-        rm -rf clang.tar.gz
-        cd ../kernel_xiaomi_sm8250
-    fi
-}
-
-build() {
-    git log $LAST..HEAD > ../changelog.txt
-    BRANCH=$(git branch --show-current)
-
-    MAGICTIME=$MAIN/MagicTime-$DEVICE
-
-    if [ ! -d $MAGICTIME ]; then
-        mkdir -p $MAGICTIME
-
-        if [ ! -d $MAGICTIME/Anykernel ]; then
-            git clone https://github.com/TIMISONG-dev/Anykernel.git \
-                $MAGICTIME/Anykernel
-
-            mv $MAGICTIME/Anykernel/* $MAGICTIME/
-
-            rm -rf $MAGICTIME/Anykernel
-        fi
-    else
-        if [ -d $MAGICTIME/.git ]; then
-            rm -rf $MAGICTIME/.git
-        fi
-    fi
-
-    if [ $DEVICE = pipa ]; then
-        IMG=$MAGICTIME/kernels/Image
-        DTB=$MAGICTIME/kernels/dtb
-        DTBO=$MAGICTIME/kernels/dtbo.img
-    else
-        IMG=$MAGICTIME/Image
-        DTB=$MAGICTIME/dtb
-        DTBO=$MAGICTIME/dtbo.img
-    fi
-
-    make O="$OUT" \
-            ${DEVICE}_defconfig \
-            vendor/xiaomi/magictime-common.config
-
-    # Компиляция ядра
-    make -j $(nproc) \
-                O="$OUT" \
-                CC="ccache clang" \
-                HOSTCC=gcc \
-                LD=ld.lld \
-                AS=llvm-as \
-                AR=llvm-ar \
-                NM=llvm-nm \
-                OBJCOPY=llvm-objcopy \
-                OBJDUMP=llvm-objdump \
-                STRIP=llvm-strip \
-                LLVM=1 \
-                LLVM_IAS=1 \
-                V=$VERBOSE 2>&1 | tee build.log
-
-find $DTS -name '*.dtb' -exec cat {} + > $DTB
-find $DTS -name 'Image' -exec cat {} + > $IMG
-find $DTS -name 'dtbo.img' -exec cat {} + > $DTBO
-
-END=$(date +%s)
-ELAPSED=$((END - START))
-
-if grep -q -E "Ошибка 2|Error 2" build.log; then
-    echo Ошибка: Сборка завершилась с ошибкой
-
-    curl -s -X POST https://api.telegram.org/bot$TGTOKEN/sendMessage \
-    -d chat_id=@magictimekernel \
-    -d text="Ошибка в компиляции!" \
-    -d message_thread_id=38153
-
-    curl -s -X POST https://api.telegram.org/bot$TGTOKEN/sendDocument?chat_id=@magictimekernel \
-    -F document=@./build.log \
-    -F message_thread_id=38153
-
-    curl -s -X POST https://api.telegram.org/bot$TGTOKEN/sendDocument?chat_id=@magictimekernel \
-    -F document=@../changelog.txt \
-    -F message_thread_id=38153
+echo "Cloning AnyKernel3 for packing kernel..."
+if [ -d "anykernel/.git" ]; then
+    echo "AnyKernel3 already cloned. Skipping."
 else
-    echo Общее время выполнения: $ELAPSED секунд
-
-    cd $MAGICTIME
-    7z a -mx9 MagicTime-$DEVICE-$BUILD_DATE.zip * -x!*.zip
-    
-    curl -s -X POST https://api.telegram.org/bot$TGTOKEN/sendMessage \
-    -d chat_id=@magictimekernel \
-    -d text="Компиляция завершилась успешно! Время выполнения: $ELAPSED секунд" \
-    -d message_thread_id=38153
-
-    curl -s -X POST https://api.telegram.org/bot$TGTOKEN/sendDocument?chat_id=@magictimekernel \
-    -F document=@./MagicTime-$DEVICE-$BUILD_DATE.zip \
-    -F caption="MagicTime ${VERSION}${PREFIX}${BUILD} (${DESC}) branch: ${BRANCH}" \
-    -F message_thread_id=38153
-    
-    curl -s -X POST https://api.telegram.org/bot$TGTOKEN/sendDocument?chat_id=@magictimekernel \
-    -F document=@../changelog.txt \
-    -F caption="Latest changes" \
-    -F message_thread_id=38153
-
-    rm -rf MagicTime-$DEVICE-$BUILD_DATE.zip
-
-    BUILD=$((BUILD + 1))
-
-    cd $KERNEL
-    LAST=$(git log -1 --format=%H)
-
-    sed -i "s/LAST=.*/LAST=$LAST/" ../settings.sh
-    sed -i "s/BUILD=.*/BUILD=$BUILD/" ../settings.sh
-fi
-}
-
-check_and_wget $CLANG \
-    https://github.com/ZyCromerZ/Clang/releases/download/22.0.0git-20250805-release/Clang-22.0.0git-20250805.tar.gz
-check_and_clone $GCC_ARM \
-    https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9 \
-        arm-linux-androideabi-4.9
-check_and_clone $GCC_AARCH64 \
-    https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9 \
-        aarch64-linux-android-4.9
-
-export PATH=$CLANG/bin:$GCC_AARCH64/bin:$GCC_ARM/bin:$PATH
-export ARCH=arm64
-export CROSS_COMPILE=aarch64-linux-gnu-
-export CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
-export KBUILD_BUILD_USER=TIMISONG
-export KBUILD_BUILD_HOST=timisong-dev
-
-BUILD_DATE=$(date '+%Y-%m-%d_%H-%M-%S')
-
-OUT=out
-
-if [ $LEVEL = 1 ] && [ $TYPE = test ]; then
-    DEVICE="alioth"
-    DESC="POCO F3 build"
-    build
-    LEVEL=$((LEVEL + 1))
-    sed -i "s/LEVEL=.*/LEVEL=$LEVEL/" ../settings.sh
-    clear
+    rm -rf anykernel  # ensure clean state
+    git clone https://github.com/CuriousNom/AnyKernel3 -b pipa-mt --single-branch --depth=1 anykernel
 fi
 
-if [ $LEVEL = 1 ] && [ $TYPE = early ]; then
-    build
-    clear
-fi
+    # ------------- Building for PIPA ---------------
+    echo "Clearing [out/] and building for PIPA....."
 
-if [ $TYPE = test ]; then
-    if [ $LEVEL = 2 ]; then
-        DEVICE="pipa"
-        DESC="Mi Pad 6 AOSP build"
-        build
-        LEVEL=$((LEVEL + 1))
-        sed -i "s/LEVEL=.*/LEVEL=$LEVEL/" ../settings.sh
-        clear
+    make $MAKE_ARGS pipa_defconfig vendor/xiaomi/magictime-common.config
+
+    make $MAKE_ARGS -j$(nproc --all) 2> >(tee -a error.log >&2)
+
+    if [ -f "out/arch/arm64/boot/Image" ]; then
+        echo "The file [out/arch/arm64/boot/Image] exists. AOSP Build successfully."
+    else
+        echo "The file [out/arch/arm64/boot/Image] does not exist. Seems AOSP build failed."
+        exit 1
     fi
 
-    if [ $LEVEL = 3 ]; then
-        DEVICE="alioth"
-        git cherry-pick 6180281005f4a2ce7ea4895d1e35be47f99b3e11
-        DESC="POCO F3 build 5k battery"
-        build
-        LEVEL=$((LEVEL + 1))
-        sed -i "s/LEVEL=.*/LEVEL=$LEVEL/" ../settings.sh
-        clear
-        git reset --hard HEAD~1
-    fi
+    rm -rf anykernel/kernels/
+    mkdir -p anykernel/kernels/
+    cp out/arch/arm64/boot/Image anykernel/kernels/
+    cp out/arch/arm64/boot/dtb anykernel/kernels/
 
-    if [ $LEVEL = 4 ]; then
-        git revert 48d6466f502f0ed1ecafbad71aac79ec64f60cd8 --no-edit
-        git revert 525dbd2c5c97546c1305a245f0c613d9a4f39519 --no-edit
-        git revert a3f0009c637419795baf4195c4b236aa4c23a00a --no-edit
-        DESC="POCO F3 build without susfs"
-        build
-        LEVEL=$((LEVEL + 1))
-        sed -i "s/LEVEL=.*/LEVEL=$LEVEL/" ../settings.sh
-        clear
-    fi
+    cd anykernel
+    ZIP_FILENAME=Kernel_MagicTime_AOSP_pipa_$(date +'%Y%m%d_%H%M%S')_anykernel3_${GIT_COMMIT_ID}.zip
+    zip -r9 $ZIP_FILENAME ./* -x .git .gitignore out/ ./*.zip
+    mv $ZIP_FILENAME ../
+    cd ..
 
-    if [ $LEVEL = 5 ]; then
-        if [ $EXTRA = "!4"]; then
-            git revert 48d6466f502f0ed1ecafbad71aac79ec64f60cd8 --no-edit
-            git revert 525dbd2c5c97546c1305a245f0c613d9a4f39519 --no-edit
-            git revert a3f0009c637419795baf4195c4b236aa4c23a00a --no-edit
-        fi
-        DEVICE="pipa"
-        DESC="Mi Pad 6 AOSP build without susfs"
-        build
-        LEVEL=$((LEVEL + 1))
-        sed -i "s/LEVEL=.*/LEVEL=$LEVEL/" ../settings.sh
-        clear
-    fi
+    echo "Build for PIPA finished."
 
-    if [ $LEVEL = 6 ]; then
-        if [ $EXTRA = "!4"]; then
-            git revert 48d6466f502f0ed1ecafbad71aac79ec64f60cd8 --no-edit
-            git revert 525dbd2c5c97546c1305a245f0c613d9a4f39519 --no-edit
-            git revert a3f0009c637419795baf4195c4b236aa4c23a00a --no-edit
-        fi
-        DEVICE="alioth"
-        git cherry-pick 6180281005f4a2ce7ea4895d1e35be47f99b3e11
-        DESC="POCO F3 build 5k battery without susfs"
-        build
-        LEVEL=$((LEVEL + 1))
-        sed -i "s/LEVEL=.*/LEVEL=$LEVEL/" ../settings.sh
-        clear
-
-        git reset --hard HEAD~4
-        clear
-    fi
-
-    # MIUI
-
-    git checkout magictime-miui
-
-    if [ $LEVEL = 7 ]; then
-        DESC="POCO F3 MIUI build"
-        build
-        LEVEL=$((LEVEL + 1))
-        sed -i "s/LEVEL=.*/LEVEL=$LEVEL/" ../settings.sh
-        clear
-    fi
-
-    if [ $LEVEL = 8 ]; then
-        DEVICE="pipa"
-        DESC="Mi Pad 6 MIUI build"
-        build
-        LEVEL=$((LEVEL + 1))
-        sed -i "s/LEVEL=.*/LEVEL=$LEVEL/" ../settings.sh
-        clear
-    fi
-
-    if [ $LEVEL = 9 ]; then
-        DEVICE="alioth"
-        git cherry-pick 6180281005f4a2ce7ea4895d1e35be47f99b3e11
-        DESC="POCO F3 MIUI build 5k battery"
-        build
-        LEVEL=$((LEVEL + 1))
-        sed -i "s/LEVEL=.*/LEVEL=$LEVEL/" ../settings.sh
-        clear
-        git reset --hard HEAD~1
-    fi
-
-    if [ $LEVEL = 10 ]; then
-        git revert 48d6466f502f0ed1ecafbad71aac79ec64f60cd8 --no-edit
-        git revert 525dbd2c5c97546c1305a245f0c613d9a4f39519 --no-edit
-        git revert a3f0009c637419795baf4195c4b236aa4c23a00a --no-edit
-        DESC="POCO F3 MIUI build without susfs"
-        build
-        LEVEL=$((LEVEL + 1))
-        sed -i "s/LEVEL=.*/LEVEL=$LEVEL/" ../settings.sh
-        clear
-    fi
-
-    if [ $LEVEL = 11 ]; then
-        if [ $EXTRA = "!10" ]; then
-            git revert 48d6466f502f0ed1ecafbad71aac79ec64f60cd8 --no-edit
-            git revert 525dbd2c5c97546c1305a245f0c613d9a4f39519 --no-edit
-            git revert a3f0009c637419795baf4195c4b236aa4c23a00a --no-edit
-        fi
-        DEVICE="pipa"
-        DESC="Mi Pad 6 MIUI build without susfs"
-        build
-        LEVEL=$((LEVEL + 1))
-        sed -i "s/LEVEL=.*/LEVEL=$LEVEL/" ../settings.sh
-        clear
-    fi
-
-    if [ $LEVEL = 12 ]; then
-        if [ $EXTRA = "!10" ]; then
-            git revert 48d6466f502f0ed1ecafbad71aac79ec64f60cd8 --no-edit
-            git revert 525dbd2c5c97546c1305a245f0c613d9a4f39519 --no-edit
-            git revert a3f0009c637419795baf4195c4b236aa4c23a00a --no-edit
-        fi
-        DEVICE="alioth"
-        git cherry-pick 6180281005f4a2ce7ea4895d1e35be47f99b3e11
-        DESC="POCO F3 MIUI build 5k battery without susfs"
-        build
-
-        git reset --hard HEAD~4
-        clear
-    fi
-
-    LEVEL=1
-    EXTRA=""
-    sed -i "s/LEVEL=.*/LEVEL=$LEVEL/" ../settings.sh
-    sed -i "s/EXTRA=.*/EXTRA=$EXTRA/" ../settings.sh
-    git checkout magictime-new
-    clear
-fi
+echo "Done. The flashable zip is: [./$ZIP_FILENAME]"
