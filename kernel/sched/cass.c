@@ -35,6 +35,7 @@ struct cass_cpu_cand {
 	unsigned long eff_util;
 	unsigned long hard_util;
 	unsigned long util;
+	bool may_not_preempt;
 };
 
 static __always_inline
@@ -86,6 +87,10 @@ bool cass_cpu_better(const struct cass_cpu_cand *a,
 #define cass_cmp(a, b) ({ res = (a) - (b); })
 #define cass_eq(a, b) ({ res = (a) == (b); })
 	long res;
+
+	/* Prefer the CPU not handling long softirqs */
+	if (cass_cmp(b->may_not_preempt, a->may_not_preempt))
+		goto done;
 
 	/* Prefer the CPU that's not overloaded */
 	if (cass_cmp(b->eff_util / b->cap_max, a->eff_util / a->cap_max))
@@ -169,6 +174,7 @@ static int cass_best_cpu(struct task_struct *p, int prev_cpu, bool sync, bool rt
 		struct cass_cpu_cand *curr = &cands[cidx];
 		struct cpuidle_state *idle_state;
 		struct rq *rq = cpu_rq(cpu);
+		struct task_struct *tsk = READ_ONCE(rq->curr);
 
 		/* Get the original, maximum _possible_ capacity of this CPU */
 		curr->cap_orig = arch_scale_cpu_capacity(cpu);
@@ -216,6 +222,12 @@ static int cass_best_cpu(struct task_struct *p, int prev_cpu, bool sync, bool rt
 			/* Zero exit latency indicates this CPU isn't idle */
 			curr->exit_lat = 0;
 		}
+
+		/* Check if the current task on this CPU may not be preemptible */
+		if (rt)
+			curr->may_not_preempt = task_may_not_preempt(tsk, cpu);
+		else
+			curr->may_not_preempt = false;
 
 		/* Get this CPU's capacity and utilization */
 		curr->cpu = cpu;
