@@ -217,22 +217,23 @@ if [ "$TYPE" = "test" ]; then
     # Format: "DEVICE:BRANCH:MOD_KSU:MOD_BATTERY:DESC:FILE"
     CONFIGS=(
         "alioth:magictime-new:ksu:stk:POCO F3 AOSP:AOSP-KSU"
-        "pipa:magictime-new:ksu:stk:Mi Pad 6 AOSP:AOSP-KSU"
-	    "apollo:magictime-new:ksu:stk:Mi 10T AOSP:AOSP-KSU"
-        "alioth:magictime-new:ksu:5k:POCO F3 AOSP 5k battery:AOSP-KSU-5K"
         "alioth:magictime-new:no_ksu:stk:POCO F3 AOSP without KSU:AOSP-NONKSU"
-        "pipa:magictime-new:no_ksu:stk:Mi Pad 6 AOSP without KSU:AOSP-NONKSU"
-	    "apollo:magictime-new:no_ksu:stk:Mi 10T AOSP without KSU:AOSP-NONKSU"
+        "alioth:magictime-new:ksu:5k:POCO F3 AOSP 5k battery:AOSP-KSU-5K"
         "alioth:magictime-new:no_ksu:5k:POCO F3 AOSP without KSU 5k battery:AOSP-NONKSU-5K"
-        
         "alioth:magictime-miui:ksu:stk:POCO F3 MIUI:MIUI-KSU"
-        "pipa:magictime-miui:ksu:stk:Mi Pad 6 MIUI:MIUI-KSU"
-	    "apollo:magictime-miui:ksu:stk:Mi 10T MIUI:MIUI-KSU"
-        "alioth:magictime-miui:ksu:5k:POCO F3 MIUI 5k battery:MIUI-KSU-5K"
         "alioth:magictime-miui:no_ksu:stk:POCO F3 MIUI without KSU:MIUI-NONKSU"
-        "pipa:magictime-miui:no_ksu:stk:Mi Pad 6 MIUI without KSU:MIUI-NONKSU"
-	    "apollo:magictime-miui:no_ksu:stk:Mi 10T MIUI without KSU:MIUI-NONKSU"
+        "alioth:magictime-miui:ksu:5k:POCO F3 MIUI 5k battery:MIUI-KSU-5K"
         "alioth:magictime-miui:no_ksu:5k:POCO F3 MIUI without KSU 5k battery:MIUI-NONKSU-5K"
+
+        "pipa:magictime-new:ksu:stk:Mi Pad 6 AOSP:AOSP-KSU"
+        "pipa:magictime-new:no_ksu:stk:Mi Pad 6 AOSP without KSU:AOSP-NONKSU"
+        "pipa:magictime-miui:ksu:stk:Mi Pad 6 MIUI:MIUI-KSU"
+        "pipa:magictime-miui:no_ksu:stk:Mi Pad 6 MIUI without KSU:MIUI-NONKSU"
+
+	    "apollo:magictime-new:ksu:stk:Mi 10T AOSP:AOSP-KSU"
+	    "apollo:magictime-new:no_ksu:stk:Mi 10T AOSP without KSU:AOSP-NONKSU"
+        "apollo:magictime-miui:ksu:stk:Mi 10T MIUI:MIUI-KSU"
+	    "apollo:magictime-miui:no_ksu:stk:Mi 10T MIUI without KSU:MIUI-NONKSU"
     )
 
     while true; do
@@ -258,7 +259,7 @@ if [ "$TYPE" = "test" ]; then
         git reset --hard "origin/$BRANCH" >/dev/null 2>&1
 
         if [ "$MOD_BATTERY" = "5k" ]; then
-            git cherry-pick --no-commit "$SHAB" >/dev/null 2>&1
+            git cherry-pick "$SHAB" >/dev/null 2>&1
             if [ $? -ne 0 ]; then
                 git cherry-pick --abort >/dev/null 2>&1
                 exit 1
@@ -266,7 +267,7 @@ if [ "$TYPE" = "test" ]; then
         fi
 
         if [ "$MOD_KSU" = "no_ksu" ]; then
-            git cherry-pick --no-commit "$SHAK" >/dev/null 2>&1
+            git cherry-pick "$SHAK" >/dev/null 2>&1
             if [ $? -ne 0 ]; then
                 git cherry-pick --abort >/dev/null 2>&1
                 exit 1
